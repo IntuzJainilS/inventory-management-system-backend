@@ -61,7 +61,7 @@ export const orderCreation = async (req: Request, res: Response) => {
 
         //  Create the order with the calculated total
         const createorder = await orders.create({
-            user_id: user_id,
+            user_id: user_id as string,
             total_amount: calculatedTotalAmount,
         }) as any;
 
@@ -178,12 +178,12 @@ export const orderCancelling = async (req: Request, res: Response) => {
         }
 
         // Validate that the order is actually pending before cancelling it- because after placing stock_quantity changed
-        if (order.status !== 'pending') {
-            return res.status(400).json({
-                success: false,
-                message: `Cannot cancel order. Order status is currently '${order.status}'`
-            });
-        }
+        // if (order.status !== 'pending') {
+        //     return res.status(400).json({
+        //         success: false,
+        //         message: `Cannot cancel order. Order status is currently '${order.status}'`
+        //     });
+        // }
 
         //  Loop through the items and release the reserved stock
         for (const item of items) {
@@ -198,6 +198,7 @@ export const orderCancelling = async (req: Request, res: Response) => {
 
             // Decrease reservedQuantity by the ordered quantity
             product.reserved_quantity -= item.quantity;
+            product.stock_quantity -= item.quantity;  // also decrease stock quantity
 
             await product.save();
         }
@@ -249,6 +250,57 @@ export const orderCancelling = async (req: Request, res: Response) => {
 //     }
 // }
 
+// controller to get order details 
+export const orderDetail = async (req: Request, res: Response) => {
+    try {
+        const { order_id } = req.params;
+
+        if (!order_id) {
+            return res.status(400).json({
+                success: false,
+                message: "order_id not found"
+            });
+        }
+
+        const orderDetail = await orders.findByPk(order_id as string, {
+            attributes: ['user_id', 'status', 'total_amount', 'createdAt'],
+            include: [
+                {
+                    model: orderItems,
+                    attributes: ['quantity', 'price_at_purchase'],
+                    include: [
+                        {
+                            model: Products,
+                            attributes: ['id', 'name', 'price']
+                        }
+                    ]
+                }
+            ]
+        });
+
+        if (!orderDetail) {
+            return res.status(404).json({
+                success: false,
+                message: "No details found for this order"
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: "Order details fetched successfully",
+            data: orderDetail
+        });
+
+    } catch (error) {
+        console.error(error); 
+        return res.status(500).json({
+            success: false,
+            message: "Error in fetching order details",
+            error,
+        });
+    }
+};
+
 // controller to get order history
 export const orderHistory = async (req: Request, res: Response) => {
     try {
@@ -268,7 +320,7 @@ export const orderHistory = async (req: Request, res: Response) => {
         const safeOrder = ['ASC', 'DESC'].includes((order as string).toUpperCase())
             ? (order as string).toUpperCase()
             : 'DESC';
-        
+
         const offset = (Number(page) - 1) * Number(limit);
 
 

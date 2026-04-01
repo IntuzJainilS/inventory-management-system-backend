@@ -1,6 +1,7 @@
 import express, {Request, Response} from "express";
 import { connectDB } from "./config/db";
 import dotenv from 'dotenv';
+import authRoute from "./routes/authRoute"
 import productRoute from "./routes/productRoutes";
 import orderRoute from './routes/orderRoutes'
 
@@ -10,6 +11,7 @@ const app = express()
 
 app.use(express.json())
 
+app.use("/api", authRoute)
 app.use("/api",productRoute);
 app.use("/api",orderRoute);
 

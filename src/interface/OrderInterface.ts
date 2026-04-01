@@ -1,7 +1,7 @@
 export interface orderInterface {
-    id:string;
+    id?:string;
     user_id:string;
-    status:string;
+    status?:string;
     total_amount:number;
     createdAt?: Date;
     updatedAt?: Date;
