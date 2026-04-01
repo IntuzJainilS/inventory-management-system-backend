@@ -4,12 +4,19 @@ import dotenv from 'dotenv';
 import authRoute from "./routes/authRoute"
 import productRoute from "./routes/productRoutes";
 import orderRoute from './routes/orderRoutes'
+import cors from 'cors';
+
 
 dotenv.config();
 
 const app = express()
 
 app.use(express.json())
+
+app.use(cors({
+  origin: 'http://localhost:3000',
+  credentials: true
+}))
 
 app.use("/api", authRoute)
 app.use("/api",productRoute);

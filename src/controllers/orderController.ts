@@ -9,6 +9,7 @@ import { orderItems } from "../models/OrderItems";
 
 // controller for order creation 
 export const orderCreation = async (req: Request, res: Response) => {
+    const t = await sequelize.transaction(); // transaction initiated
     try {
         const { user_id } = req.params;
         const { items } = req.body; // this should have array of items with product ID and quantity  
@@ -16,6 +17,7 @@ export const orderCreation = async (req: Request, res: Response) => {
         console.log("items:", items)
 
         if (!items || !Array.isArray(items) || items.length === 0) {
+            await t.rollback();
             return res.status(400).json({
                 success: false,
                 message: "No items received "
@@ -26,17 +28,18 @@ export const orderCreation = async (req: Request, res: Response) => {
         const processedItems = [];
 
         for (const item of items) {
-            const product = await Products.findByPk(item.product_id) as (Model<ProductAttributes> & ProductAttributes) | null;
-
-            const available_stock = (product?.stock_quantity ?? 0) - (product?.reserved_quantity ?? 0);
-            console.log("available stock:", available_stock)
+            const product = await Products.findByPk(item.product_id, { transaction: t }) as (Model<ProductAttributes> & ProductAttributes) | null;
 
             if (!product) {
+                await t.rollback();
                 return res.status(404).json({
                     success: false,
                     message: `Product with ID ${item.id} not found`
                 });
             }
+
+            const available_stock = (product?.stock_quantity ?? 0) - (product?.reserved_quantity ?? 0);
+            console.log("available stock:", available_stock)
 
             if (available_stock < item.quantity) {
                 return res.status(400).json({
@@ -47,7 +50,7 @@ export const orderCreation = async (req: Request, res: Response) => {
 
             // increase reserved quantity
             product.reserved_quantity += item.quantity;
-            await product.save();
+            await product.save({ transaction: t });
 
             // Multiply price by user-requested quantity
             calculatedTotalAmount += product.price * item.quantity;
@@ -63,7 +66,7 @@ export const orderCreation = async (req: Request, res: Response) => {
         const createorder = await orders.create({
             user_id: user_id as string,
             total_amount: calculatedTotalAmount,
-        }) as any;
+        }, { transaction: t }) as any;
 
         const itemsToInsert = processedItems.map((item) => ({
             order_id: createorder.id, // Use the ID from the order just created
@@ -71,7 +74,9 @@ export const orderCreation = async (req: Request, res: Response) => {
             quantity: item.quantity,
             price_at_purchase: item.price_at_purchase
         }));
-        const createOrderItems = await orderItems.bulkCreate(itemsToInsert as any)
+        const createOrderItems = await orderItems.bulkCreate(itemsToInsert as any, { transaction: t })
+
+         await t.commit();
 
         return res.status(201).json({
             success: true,
@@ -80,6 +85,7 @@ export const orderCreation = async (req: Request, res: Response) => {
         });
 
     } catch (error) {
+        if (t) await t.rollback();
         console.error("Order creation error:", error);
         return res.status(500).json({
             success: false,
@@ -90,19 +96,22 @@ export const orderCreation = async (req: Request, res: Response) => {
 
 // controller to place order
 export const orderPlacing = async (req: Request, res: Response) => {
+     const t = await sequelize.transaction();
     try {
         const { order_id } = req.params;
         const { items } = req.body;
 
         if (!items || !Array.isArray(items) || items.length === 0) {
+            await t.rollback();
             return res.status(400).json({
                 success: false,
                 message: "No items received"
             });
         }
 
-        const order = await orders.findByPk(order_id as string) as (Model<orderInterface, orderInterface> & orderInterface) | null;
+        const order = await orders.findByPk(order_id as string, { transaction: t }) as (Model<orderInterface, orderInterface> & orderInterface) | null;
         if (!order) {
+             await t.rollback();
             return res.status(404).json({
                 success: false,
                 message: "Order not found"
@@ -110,6 +119,7 @@ export const orderPlacing = async (req: Request, res: Response) => {
         }
 
         if (order.status !== 'pending') {
+             await t.rollback();
             return res.status(400).json({
                 success: false,
                 message: `Cannot place order. Order status is currently '${order.status}'`
@@ -117,9 +127,10 @@ export const orderPlacing = async (req: Request, res: Response) => {
         }
 
         for (const item of items) {
-            const product = await Products.findByPk(item.product_id) as (Model<ProductAttributes> & ProductAttributes) | null;
+            const product = await Products.findByPk(item.product_id, { transaction: t }) as (Model<ProductAttributes> & ProductAttributes) | null;
 
             if (!product) {
+                await t.rollback();
                 return res.status(404).json({
                     success: false,
                     message: `Product with ID ${item.product_id} not found`
@@ -133,12 +144,14 @@ export const orderPlacing = async (req: Request, res: Response) => {
             product.reserved_quantity -= item.quantity;
 
             // Save the updated quantities for this specific product
-            await product.save();
+            await product.save({ transaction: t });
         }
 
         // Update status to placed
         order.status = 'placed';
-        await order.save();
+        await order.save({ transaction: t });
+
+        await t.commit();
 
         return res.status(200).json({
             success: true,
@@ -147,6 +160,7 @@ export const orderPlacing = async (req: Request, res: Response) => {
         });
 
     } catch (error) {
+        if (t) await t.rollback();
         console.error("Order placing error:", error);
         return res.status(500).json({
             success: false,
@@ -158,19 +172,23 @@ export const orderPlacing = async (req: Request, res: Response) => {
 //controller to cancell order  
 export const orderCancelling = async (req: Request, res: Response) => {
     try {
+            const t = await sequelize.transaction();
+        
         const { order_id } = req.params;
         const { items } = req.body;
 
         if (!items || !Array.isArray(items) || items.length === 0) {
+             await t.rollback();
             return res.status(400).json({
                 success: false,
                 message: "No items received"
             });
         }
 
-        const order = await orders.findByPk(order_id as string) as (Model<orderInterface, orderInterface> & orderInterface) | null;
+        const order = await orders.findByPk(order_id as string, { transaction: t }) as (Model<orderInterface, orderInterface> & orderInterface) | null;
 
         if (!order) {
+             await t.rollback();
             return res.status(404).json({
                 success: false,
                 message: "Order not found"
@@ -187,9 +205,10 @@ export const orderCancelling = async (req: Request, res: Response) => {
 
         //  Loop through the items and release the reserved stock
         for (const item of items) {
-            const product = await Products.findByPk(item.product_id) as (Model<ProductAttributes> & ProductAttributes) | null;
+            const product = await Products.findByPk(item.product_id, { transaction: t }) as (Model<ProductAttributes> & ProductAttributes) | null;
 
             if (!product) {
+                 await t.rollback();
                 return res.status(404).json({
                     success: false,
                     message: `Product with ID ${item.product_id} not found`
@@ -200,12 +219,14 @@ export const orderCancelling = async (req: Request, res: Response) => {
             product.reserved_quantity -= item.quantity;
             product.stock_quantity -= item.quantity;  // also decrease stock quantity
 
-            await product.save();
+            await product.save({ transaction: t });
         }
 
         // 4. Update status to cancelled
         order.status = 'cancelled';
-        await order.save();
+        await order.save({ transaction: t });
+
+        await t.commit();
 
         return res.status(200).json({
             success: true,
@@ -292,7 +313,7 @@ export const orderDetail = async (req: Request, res: Response) => {
         });
 
     } catch (error) {
-        console.error(error); 
+        console.error(error);
         return res.status(500).json({
             success: false,
             message: "Error in fetching order details",
