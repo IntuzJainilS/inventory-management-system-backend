@@ -24,6 +24,10 @@ export const User = sequelize.define<Model<userattributes>>('users', {
         type: DataTypes.STRING,
 
     },
+    usertype: {
+        type: DataTypes.ENUM('user', 'admin'),
+        defaultValue: 'user',
+    },
     deleted_at: {
         type: DataTypes.DATE,
         allowNull: true,

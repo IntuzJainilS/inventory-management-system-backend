@@ -76,7 +76,7 @@ export const orderCreation = async (req: Request, res: Response) => {
         }));
         const createOrderItems = await orderItems.bulkCreate(itemsToInsert as any, { transaction: t })
 
-         await t.commit();
+        await t.commit();
 
         return res.status(201).json({
             success: true,
@@ -96,7 +96,7 @@ export const orderCreation = async (req: Request, res: Response) => {
 
 // controller to place order
 export const orderPlacing = async (req: Request, res: Response) => {
-     const t = await sequelize.transaction();
+    const t = await sequelize.transaction();
     try {
         const { order_id } = req.params;
         const { items } = req.body;
@@ -111,7 +111,7 @@ export const orderPlacing = async (req: Request, res: Response) => {
 
         const order = await orders.findByPk(order_id as string, { transaction: t }) as (Model<orderInterface, orderInterface> & orderInterface) | null;
         if (!order) {
-             await t.rollback();
+            await t.rollback();
             return res.status(404).json({
                 success: false,
                 message: "Order not found"
@@ -119,7 +119,7 @@ export const orderPlacing = async (req: Request, res: Response) => {
         }
 
         if (order.status !== 'pending') {
-             await t.rollback();
+            await t.rollback();
             return res.status(400).json({
                 success: false,
                 message: `Cannot place order. Order status is currently '${order.status}'`
@@ -172,13 +172,13 @@ export const orderPlacing = async (req: Request, res: Response) => {
 //controller to cancell order  
 export const orderCancelling = async (req: Request, res: Response) => {
     try {
-            const t = await sequelize.transaction();
-        
+        const t = await sequelize.transaction();
+
         const { order_id } = req.params;
         const { items } = req.body;
 
         if (!items || !Array.isArray(items) || items.length === 0) {
-             await t.rollback();
+            await t.rollback();
             return res.status(400).json({
                 success: false,
                 message: "No items received"
@@ -188,7 +188,7 @@ export const orderCancelling = async (req: Request, res: Response) => {
         const order = await orders.findByPk(order_id as string, { transaction: t }) as (Model<orderInterface, orderInterface> & orderInterface) | null;
 
         if (!order) {
-             await t.rollback();
+            await t.rollback();
             return res.status(404).json({
                 success: false,
                 message: "Order not found"
@@ -208,7 +208,7 @@ export const orderCancelling = async (req: Request, res: Response) => {
             const product = await Products.findByPk(item.product_id, { transaction: t }) as (Model<ProductAttributes> & ProductAttributes) | null;
 
             if (!product) {
-                 await t.rollback();
+                await t.rollback();
                 return res.status(404).json({
                     success: false,
                     message: `Product with ID ${item.product_id} not found`
@@ -393,6 +393,46 @@ export const orderHistory = async (req: Request, res: Response) => {
         return res.status(500).json({
             success: false,
             message: "Failed to insert into order items"
+        });
+    }
+}
+
+// controller to fetch order which are already created and has status pending 
+export const order = async (req: Request, res: Response) => {
+    try {
+        const pendingOrders = await orders.findAll({
+            where: { status: "pending" },
+            attributes: ['id','user_id', 'status', 'total_amount', 'createdAt'],
+            include: [
+                {
+                    model: orderItems,
+                    attributes: ['quantity', 'price_at_purchase'],
+                    include: [
+                        {
+                            model: Products,
+                            attributes: ['name', 'price']
+                        }
+                    ]
+                }
+            ]
+        })
+        if (!pendingOrders) {
+            return res.status(404).json({
+                success: false,
+                message: "no pending order found",
+            })
+        }
+        return res.status(200).json({
+            success:true,
+            message:"pending orders fetched successfully",
+            data:pendingOrders,
+        })
+    } catch (error) {
+        console.error(error);
+        return res.status(500).json({
+            success: false,
+            message: "Error in fetching order",
+            error,
         });
     }
 }

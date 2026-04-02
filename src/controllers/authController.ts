@@ -74,9 +74,9 @@ export const userLogin = async (req: Request, res: Response) => {
     }
 
     const token = jwt.sign(
-        { id: searchUser.user_id, email: searchUser.email, usertype: searchUser.usertype },
+        { id: searchUser.id, email: searchUser.email, usertype: searchUser.usertype },
         process.env.JWT_SECRET as string,
         { expiresIn: "1d" }
     );
-    res.json({ success: true, token, email: searchUser.email });
+    res.json({ success: true, token, email: searchUser.email, usertype: searchUser.usertype });
 }
