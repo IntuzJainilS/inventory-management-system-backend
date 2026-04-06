@@ -5,9 +5,9 @@ import { checkAdmin } from "../middleware/isAdmin";
 
 const router = Router();
 
-router.post('/order/:user_id', verifyToken, checkAdmin, orderCreation); // creation of order
+router.post('/create-order', verifyToken, checkAdmin, orderCreation); // creation of order
 
-router.put('/place-order/:order_id', verifyToken, checkAdmin, orderPlacing); //router to place order
+router.put('/place-order/:order_id', orderPlacing); //router to place order
 
 router.put('/order-cancel/:order_id', verifyToken, checkAdmin, orderCancelling); // router to cancel order
 

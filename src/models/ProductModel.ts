@@ -3,6 +3,7 @@ import { sequelize } from "../config/db";
 import { ProductAttributes } from "../interface/ProductInterface";
 import { orders } from "./OrderModel";
 import { orderItems } from "./OrderItems";
+import { User } from "./Usermodel";
 
 export const Products = sequelize.define<Model<ProductAttributes>>("products", {
     id: {
@@ -38,25 +39,27 @@ export const Products = sequelize.define<Model<ProductAttributes>>("products", {
 )
 
 // associations
-orders.belongsToMany(Products,{
-    through:orderItems,
-    foreignKey:"order_id",
-    as:'products'
+orders.belongsToMany(Products, {
+    through: orderItems,
+    foreignKey: "order_id",
+    as: 'products'
 })
-Products.belongsToMany(orders,{
-    through:orderItems,
-    foreignKey:"product_id",
-    as:'orders'
+Products.belongsToMany(orders, {
+    through: orderItems,
+    foreignKey: "product_id",
+    as: 'orders'
 })
-orderItems.belongsTo(Products,{
-    foreignKey:'product_id'
+orderItems.belongsTo(Products, {
+    foreignKey: 'product_id'
 })
-orderItems.belongsTo(orders,{
-    foreignKey:"order_id",
+orderItems.belongsTo(orders, {
+    foreignKey: "order_id",
 })
-Products.hasMany(orderItems,{
-    foreignKey:'product_id'
+Products.hasMany(orderItems, {
+    foreignKey: 'product_id'
 })
-orders.hasMany(orderItems,{
-    foreignKey:"order_id",
+orders.hasMany(orderItems, {
+    foreignKey: "order_id",
 })
+orders.belongsTo(User, { foreignKey: 'user_id' });
+User.hasMany(orders, { foreignKey: 'user_id' });

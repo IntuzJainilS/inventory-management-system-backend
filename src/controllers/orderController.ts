@@ -6,12 +6,18 @@ import { Model, where } from "sequelize";
 import { sequelize } from "../config/db";
 import { orderInterface } from "../interface/OrderInterface";
 import { orderItems } from "../models/OrderItems";
+import { User } from "../models/Usermodel";
+import { Op } from "sequelize";
+
 
 // controller for order creation 
 export const orderCreation = async (req: Request, res: Response) => {
     const t = await sequelize.transaction(); // transaction initiated
     try {
-        const { user_id } = req.params;
+        const user_id = req.user.id;
+        if (!user_id) {
+            console.log("user id not found")
+        }
         const { items } = req.body; // this should have array of items with product ID and quantity  
 
         console.log("items:", items)
@@ -28,7 +34,7 @@ export const orderCreation = async (req: Request, res: Response) => {
         const processedItems = [];
 
         for (const item of items) {
-            const product = await Products.findByPk(item.product_id, { transaction: t }) as (Model<ProductAttributes> & ProductAttributes) | null;
+            const product = await Products.findByPk(item.id, { transaction: t }) as (Model<ProductAttributes> & ProductAttributes) | null;
 
             if (!product) {
                 await t.rollback();
@@ -108,6 +114,7 @@ export const orderPlacing = async (req: Request, res: Response) => {
                 message: "No items received"
             });
         }
+        console.log("items:", items)
 
         const order = await orders.findByPk(order_id as string, { transaction: t }) as (Model<orderInterface, orderInterface> & orderInterface) | null;
         if (!order) {
@@ -127,13 +134,13 @@ export const orderPlacing = async (req: Request, res: Response) => {
         }
 
         for (const item of items) {
-            const product = await Products.findByPk(item.product_id, { transaction: t }) as (Model<ProductAttributes> & ProductAttributes) | null;
+            const product = await Products.findByPk(item.id, { transaction: t }) as (Model<ProductAttributes> & ProductAttributes) | null;
 
             if (!product) {
                 await t.rollback();
                 return res.status(404).json({
                     success: false,
-                    message: `Product with ID ${item.product_id} not found`
+                    message: `Product with ID ${item.id} not found`
                 });
             }
 
@@ -205,13 +212,13 @@ export const orderCancelling = async (req: Request, res: Response) => {
 
         //  Loop through the items and release the reserved stock
         for (const item of items) {
-            const product = await Products.findByPk(item.product_id, { transaction: t }) as (Model<ProductAttributes> & ProductAttributes) | null;
+            const product = await Products.findByPk(item.id, { transaction: t }) as (Model<ProductAttributes> & ProductAttributes) | null;
 
             if (!product) {
                 await t.rollback();
                 return res.status(404).json({
                     success: false,
-                    message: `Product with ID ${item.product_id} not found`
+                    message: `Product with ID ${item.id} not found`
                 });
             }
 
@@ -400,17 +407,61 @@ export const orderHistory = async (req: Request, res: Response) => {
 // controller to fetch order which are already created and has status pending 
 export const order = async (req: Request, res: Response) => {
     try {
-        const pendingOrders = await orders.findAll({
-            where: { status: "pending" },
-            attributes: ['id','user_id', 'status', 'total_amount', 'createdAt'],
+        const {
+            page = 1,
+            limit = 10,
+            search,
+            sort_by = 'createdAt',
+            order = 'DESC',
+            status
+        } = req.query;
+
+        const columnsAllowedForSorting = ['status', 'createdAt'];
+
+        const safeSortBy = columnsAllowedForSorting.includes(sort_by as string)
+            ? sort_by
+            : 'createdAt'; // Default if invalid
+
+        const safeOrder = ['ASC', 'DESC'].includes((order as string).toUpperCase())
+            ? (order as string).toUpperCase()
+            : 'DESC';
+
+        const offset = (Number(page) - 1) * Number(limit);
+
+        const whereClause: any = {};
+
+        if (status && status !== "") {
+            whereClause.status = status; 
+        }
+
+        if (search) {
+            whereClause[Op.or] = [
+                { full_name: { [Op.like]: `%${search}%` } },
+                { email: { [Op.like]: `%${search}%` } },
+            ];
+        }
+
+
+        const pendingOrders = await orders.findAndCountAll({
+            where: whereClause,
+            distinct: true,
+            limit: Number(limit),
+            offset: offset,
+            order: [[safeSortBy as string, safeOrder as string]],
+            attributes: ['id', 'user_id', 'status', 'total_amount', 'createdAt'],
             include: [
+                {
+                    // Fetch the User details
+                    model: User,
+                    attributes: ['full_name', 'email']
+                },
                 {
                     model: orderItems,
                     attributes: ['quantity', 'price_at_purchase'],
                     include: [
                         {
                             model: Products,
-                            attributes: ['name', 'price']
+                            attributes: ['id', 'name', 'price']
                         }
                     ]
                 }
@@ -423,9 +474,9 @@ export const order = async (req: Request, res: Response) => {
             })
         }
         return res.status(200).json({
-            success:true,
-            message:"pending orders fetched successfully",
-            data:pendingOrders,
+            success: true,
+            message: "orders fetched successfully",
+            data: pendingOrders,
         })
     } catch (error) {
         console.error(error);

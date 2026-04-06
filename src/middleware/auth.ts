@@ -10,6 +10,7 @@ export const verifyToken = (
   next: NextFunction
 ) => {
   const authHeader = req.headers.authorization;
+  console.log("authheader:",authHeader)
 
   if (!authHeader) {
     return res.status(401).json({ message: "No token provided, unauthorized" });
