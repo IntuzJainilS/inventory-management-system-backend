@@ -78,5 +78,5 @@ export const userLogin = async (req: Request, res: Response) => {
         process.env.JWT_SECRET as string,
         { expiresIn: "1d" }
     );
-    res.json({ success: true, token, email: searchUser.email, usertype: searchUser.usertype });
+    res.json({ success: true, token, email: searchUser.email, full_name:searchUser.full_name, usertype: searchUser.usertype });
 }

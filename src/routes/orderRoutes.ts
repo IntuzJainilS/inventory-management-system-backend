@@ -5,7 +5,7 @@ import { checkAdmin } from "../middleware/isAdmin";
 
 const router = Router();
 
-router.post('/create-order', verifyToken, checkAdmin, orderCreation); // creation of order
+router.post('/create-order', verifyToken, orderCreation); // creation of order
 
 router.put('/place-order/:order_id', orderPlacing); //router to place order
 
@@ -13,10 +13,10 @@ router.put('/order-cancel/:order_id', verifyToken, checkAdmin, orderCancelling);
 
 // router.get('/order-detail/:id',) // router to fetch all allorders
 
-router.get('/orders', order) // router to fetch all pending orders 
+router.get('/orders', verifyToken, checkAdmin, order) // router to fetch all pending orders 
 
 router.get('/order-detail/:order_id', verifyToken, checkAdmin, orderDetail);//eouter to get order detail
 
-router.get('/order-history/:user_id',  orderHistory);// history of order of a particular user
+router.get('/order-history', verifyToken, orderHistory);// history of order of a particular user
 
 export default router;

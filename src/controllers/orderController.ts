@@ -352,7 +352,7 @@ export const orderHistory = async (req: Request, res: Response) => {
         const offset = (Number(page) - 1) * Number(limit);
 
 
-        const { user_id } = req.params; // this should be user id 
+        const user_id = req.user.id; // user id should be fetched from jwt 
 
         if (!user_id) {
             return res.status(400).json({
@@ -365,7 +365,7 @@ export const orderHistory = async (req: Request, res: Response) => {
             where: { user_id: user_id },
             limit: Number(limit),
             offset: offset,
-            attributes: ['id', 'total_amount', 'createdAt'],
+            attributes: ['id', 'total_amount', 'createdAt', 'status'],
             include: [
                 {
                     model: orderItems,
@@ -399,7 +399,7 @@ export const orderHistory = async (req: Request, res: Response) => {
     } catch (error) {
         return res.status(500).json({
             success: false,
-            message: "Failed to insert into order items"
+            message: "Failed to fetch user profile "
         });
     }
 }
