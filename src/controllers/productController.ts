@@ -60,6 +60,15 @@ export const createProduct = async (req: Request, res: Response) => {
                 message: "All fields are required",
             })
         }
+
+        const findproduct = await Products.findOne({where: {name:name}})
+        if (findproduct) {
+            return res.status(400).json({
+                success: false,
+                message: "products with this name already exists"
+            })
+        }
+
         const Product = await Products.create(req.body)
         return res.status(201).json({
             success: true,

@@ -431,7 +431,7 @@ export const order = async (req: Request, res: Response) => {
         const whereClause: any = {};
 
         if (status && status !== "") {
-            whereClause.status = status; 
+            whereClause.status = status;
         }
 
         if (search) {
@@ -473,10 +473,17 @@ export const order = async (req: Request, res: Response) => {
                 message: "no pending order found",
             })
         }
+        const { count, rows } = pendingOrders;
         return res.status(200).json({
             success: true,
             message: "orders fetched successfully",
             data: pendingOrders,
+            pagination: {
+                totalItems: count,
+                totalPages: Math.ceil(count / Number(limit)),
+                currentPage: Number(page),
+                limit: Number(limit)
+            }
         })
     } catch (error) {
         console.error(error);

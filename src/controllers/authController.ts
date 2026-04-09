@@ -47,36 +47,42 @@ export const userRegister = async (req: Request, res: Response) => {
 }
 
 export const userLogin = async (req: Request, res: Response) => {
-    const { email, password } = req.body;
-
-    if (!password || !email) {
-        return res.status(400).json({
-            success: false,
-            message: "input required fields"
-        })
-    }
-
-    const searchUser = await User.findOne({
-        where: { email: email }
-    }) as any
-
-    if (!searchUser) {
-        return res.status(404).json({ message: "User not found" });
-    }
-    // console.log("password", password)
-    // console.log(searchUser.password)
-
-    const isMatch = await bcrypt.compare(password, searchUser.password);
-    // console.log("hased password", isMatch)
-
-    if (!isMatch) {
-        return res.status(400).json({ message: "Invalid credentials" });
-    }
-
-    const token = jwt.sign(
-        { id: searchUser.id, email: searchUser.email, usertype: searchUser.usertype },
-        process.env.JWT_SECRET as string,
-        { expiresIn: "1d" }
-    );
-    res.json({ success: true, token, email: searchUser.email, full_name:searchUser.full_name, usertype: searchUser.usertype });
+   try {
+    console.log("request incoming")
+     const { email, password } = req.body;
+ 
+     if (!password || !email) {
+         return res.status(400).json({
+             success: false,
+             message: "input required fields"
+         })
+     }
+ 
+     const searchUser = await User.findOne({
+         where: { email: email }
+     }) as any
+ 
+     if (!searchUser) {
+         return res.status(404).json({ message: "User not found" });
+     }
+     // console.log("password", password)
+     // console.log(searchUser.password)
+ 
+     const isMatch = await bcrypt.compare(password, searchUser.password);
+     // console.log("hased password", isMatch)
+ 
+     if (!isMatch) {
+         return res.status(400).json({ message: "Invalid credentials" });
+     }
+ 
+     const token = jwt.sign(
+         { id: searchUser.id, email: searchUser.email, usertype: searchUser.usertype },
+         process.env.JWT_SECRET as string,
+         { expiresIn: "1d" }
+     );
+     res.json({ success: true, token, email: searchUser.email, full_name:searchUser.full_name, usertype: searchUser.usertype });
+   } catch (error) {
+    console.error("Login error:", error);
+        return res.status(500).json({ message: "Internal server error - login failed " });
+   }
 }
