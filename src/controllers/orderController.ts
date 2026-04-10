@@ -222,9 +222,18 @@ export const orderCancelling = async (req: Request, res: Response) => {
                 });
             }
 
+            if (order.status === "pending") {
+                // keep stock quantity as it is and decrease reserved quantity
+                product.reserved_quantity -= item.quantity;
+            }
+            if (order.status === "placed") {
+                // increase reserved and stockquantity both
+                // product.reserved_quantity += item.quantity;
+                 product.stock_quantity += item.quantity;
+            }
             // Decrease reservedQuantity by the ordered quantity
-            product.reserved_quantity -= item.quantity;
-            product.stock_quantity -= item.quantity;  // also decrease stock quantity
+            // product.reserved_quantity += item.quantity;
+            // product.stock_quantity += item.quantity;  // also decrease stock quantity
 
             await product.save({ transaction: t });
         }

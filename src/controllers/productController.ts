@@ -19,7 +19,7 @@ export const getProducts = async (req: Request, res: Response) => {
                 { name: { [Op.like]: `%${search}%` } },
             ];
         }
-        const {count, rows} = await Products.findAndCountAll({where: whereClause, limit: Number(limit), offset: offset,});
+        const { count, rows } = await Products.findAndCountAll({ where: whereClause, limit: Number(limit), offset: offset, });
         if (count === 0) {
             return res.status(404).json({
                 success: false,
@@ -61,7 +61,7 @@ export const createProduct = async (req: Request, res: Response) => {
             })
         }
 
-        const findproduct = await Products.findOne({where: {name:name}})
+        const findproduct = await Products.findOne({ where: { name: name } })
         if (findproduct) {
             return res.status(400).json({
                 success: false,
@@ -84,21 +84,29 @@ export const createProduct = async (req: Request, res: Response) => {
     }
 }
 
-// export const checkProductavailibility = async (req: Request, res: Response) => {
-//     try {
-//         const { productId } = req.params
-//         const checkQuantity = await Products.findOne({ where: { id: productId, deleted_at: null } } as any)
-//         if (!checkQuantity && checkQuantity.stock_quantity < 1) {
-//             return res.status(400).json({
-//                 success: false,
-//                 message: "there is not enough quantity",
-//             })
-//         }
-//     } catch (error) {
-//         return res.status(404).json({
-//             success: false,
-//             message:"failed to fetch quantity",
-//             error
-//         })
-//     }
-// }
+export const updateQuantity = async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params
+        const { name, price, stock_quantity, reserved_quantity } = req.body
+        const findproducts = await Products.findOne({ where: { id: id } })
+        if (!findproducts) {
+            return res.status(404).json({
+                success: false,
+                message: "product not found"
+            })
+        }
+        await findproducts.update(req.body)
+        return res.status(201).json({
+            success: true,
+            message: "product updated successfully",
+            data: findproducts,
+        })
+    } catch (error) {
+        return res.status(404).json({
+            succee: false,
+            message: 'failed to update Products',
+            error,
+        })
+    }
+
+}
