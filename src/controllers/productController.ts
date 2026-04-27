@@ -121,7 +121,7 @@ export const DeleteProduct = async (req: Request, res: Response) => {
                 message: "product not found"
             })
         }
-        await findproducts.destroy(id);
+        await findproducts.destroy();
         return res.status(200).json({
             success: true,
             message: "product deleted successfully",
