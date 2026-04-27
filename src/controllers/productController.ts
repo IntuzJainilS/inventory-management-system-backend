@@ -110,3 +110,28 @@ export const updateQuantity = async (req: Request, res: Response) => {
     }
 
 }
+
+export const DeleteProduct = async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params
+        const findproducts = await Products.findOne({ where: { id: id } })
+        if (!findproducts) {
+            return res.status(404).json({
+                success: false,
+                message: "product not found"
+            })
+        }
+        await findproducts.destroy(id);
+        return res.status(200).json({
+            success: true,
+            message: "product deleted successfully",
+            data: findproducts,
+        })
+    } catch (error) {
+        return res.status(404).json({
+            succee: false,
+            message: 'failed to delete Products',
+            error,
+        })
+    }
+}

@@ -15,7 +15,7 @@ router.put('/order-cancel/:order_id', verifyToken, checkAdmin, orderCancelling);
 
 router.get('/orders', verifyToken, checkAdmin, order) // router to fetch all pending orders 
 
-router.get('/order-detail/:order_id', verifyToken, checkAdmin, orderDetail);//eouter to get order detail
+// router.get('/order-detail/:order_id', verifyToken, checkAdmin, orderDetail);//eouter to get order detail
 
 router.get('/order-history', verifyToken, orderHistory);// history of order of a particular user
 

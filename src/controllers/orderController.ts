@@ -17,6 +17,7 @@ export const orderCreation = async (req: Request, res: Response) => {
         const user_id = req.user.id;
         if (!user_id) {
             console.log("user id not found")
+            return res.status(401).json({ success: false, message: "Unauthorized, user_id not found" });
         }
         const { items } = req.body; // this should have array of items with product ID and quantity  
 
@@ -34,7 +35,7 @@ export const orderCreation = async (req: Request, res: Response) => {
         const processedItems = [];
 
         for (const item of items) {
-            const product = await Products.findByPk(item.id, { transaction: t }) as (Model<ProductAttributes> & ProductAttributes) | null;
+            const product = await Products.findByPk(item.id, { transaction: t, lock: t.LOCK.UPDATE }) as (Model<ProductAttributes> & ProductAttributes) | null;
 
             if (!product) {
                 await t.rollback();
@@ -48,6 +49,7 @@ export const orderCreation = async (req: Request, res: Response) => {
             console.log("available stock:", available_stock)
 
             if (available_stock < item.quantity) {
+                await t.rollback()
                 return res.status(400).json({
                     success: false,
                     message: `Insufficient stock for product: ${product.name}`
@@ -343,7 +345,7 @@ export const orderHistory = async (req: Request, res: Response) => {
     try {
         const {
             page = 1,
-            limit = 9,
+            limit = 20,
             sort_by = 'status',
             order = 'DESC'
         } = req.query;
