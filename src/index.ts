@@ -5,6 +5,7 @@ import authRoute from "./routes/authRoute"
 import productRoute from "./routes/productRoutes";
 import orderRoute from './routes/orderRoutes'
 import cors from 'cors';
+import { startWorker } from "./queues/inventoryQueue";
 
 
 dotenv.config();
@@ -36,6 +37,5 @@ connectDB().then(() => {
     app.listen(port, () => {
     console.log(`Server running on port ${port}`);
   });
+startWorker();
 })
-
-

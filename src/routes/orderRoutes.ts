@@ -2,12 +2,14 @@ import { Router } from "express";
 import { order, orderCancelling, orderCreation, orderDetail, orderHistory, orderPlacing } from "../controllers/orderController";
 import { verifyToken } from "../middleware/auth";
 import { checkAdmin } from "../middleware/isAdmin";
+import { rateLimiter } from "../middleware/rateLimiter";
+import { deduplicateRequest } from "../middleware/deduplication";
 
 const router = Router();
 
-router.post('/create-order', verifyToken, orderCreation); // creation of order
+router.post('/create-order', verifyToken, rateLimiter, deduplicateRequest, orderCreation); // creation of order
 
-router.put('/place-order/:order_id', orderPlacing); //router to place order
+router.put('/place-order/:order_id', checkAdmin, rateLimiter, orderPlacing); //router to place order
 
 router.put('/order-cancel/:order_id', verifyToken, checkAdmin, orderCancelling); // router to cancel order
 

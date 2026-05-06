@@ -8,6 +8,7 @@ import { orderInterface } from "../interface/OrderInterface";
 import { orderItems } from "../models/OrderItems";
 import { User } from "../models/Usermodel";
 import { Op } from "sequelize";
+import { inventoryQueue } from "../queues/inventoryQueue";
 
 
 // controller for order creation 
@@ -85,6 +86,15 @@ export const orderCreation = async (req: Request, res: Response) => {
         const createOrderItems = await orderItems.bulkCreate(itemsToInsert as any, { transaction: t })
 
         await t.commit();
+        
+        // ── Queue order confirmation job (runs in background) ──
+        await inventoryQueue.add('order-confirmation', {
+            orderId: createorder.id,
+            userId: user_id,
+            totalAmount: calculatedTotalAmount,
+        });
+        // ↑ Job is queued. Worker will process it after this function returns.
+        // Client gets res.json() immediately — no delay.
 
         return res.status(201).json({
             success: true,
@@ -231,7 +241,7 @@ export const orderCancelling = async (req: Request, res: Response) => {
             if (order.status === "placed") {
                 // increase reserved and stockquantity both
                 // product.reserved_quantity += item.quantity;
-                 product.stock_quantity += item.quantity;
+                product.stock_quantity += item.quantity;
             }
             // Decrease reservedQuantity by the ordered quantity
             // product.reserved_quantity += item.quantity;
