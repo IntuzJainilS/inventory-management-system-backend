@@ -1,0 +1,486 @@
+---
+alwaysApply: false
+---
+
+# Planning Rules — Backend Implementation Plans
+
+These rules govern how to generate, structure, and validate **phase-wise backend planning documents** stored in the `planning/` directory. Every planning document must be detailed enough that a developer (or an AI agent) can implement the phase without ambiguity.
+
+## Planning Philosophy
+
+### One Phase = One Document
+
+- Each logical phase of work gets its own markdown file in `planning/`.
+- File naming: `phase-{N}-{short-kebab-description}.md` (e.g. `phase-3-knowledge-base-email.md`).
+- A phase should be a **coherent, shippable unit** — it can be developed, tested, and reviewed independently.
+
+### Plan Before You Code
+
+- **Never start coding a phase without a completed plan.**
+- The plan is the single source of truth. If the plan is wrong, fix the plan first, then code.
+- Keep the plan up-to-date: when implementation reveals a design change, update the planning document to reflect the actual state.
+
+### Completeness Over Brevity
+
+- A good plan is one where the implementer asks **zero clarifying questions**.
+- Prefer explicit detail. Cover every API endpoint, every model field, every migration column, every validation rule.
+- If something is intentionally deferred, say so explicitly (e.g. "Deferred to Phase N").
+
+## Planning Document Structure
+
+Every phase planning document **must** include the following sections, in this order:
+
+### Title & Phase Number
+
+```markdown
+# Phase {N} — {Descriptive Title}
+```
+
+### Objectives
+
+- Bullet list of **what this phase achieves** from a product/feature perspective.
+- Written in user-facing language — what becomes possible after this phase is complete.
+- Keep to 3–6 bullets.
+
+### Dependencies
+
+- List which prior phases must be complete before this phase starts.
+- Mention specific artifacts depended upon (e.g. "Phase 1 — User model with `role` and `password_hash`, `authenticateMiddleware`, `requireRoles`").
+- If no dependencies, state: "None (foundation phase)."
+
+### Backend Scope
+
+This is the **core** of the document. It must contain the following subsections:
+
+#### Database Tables & Schema
+
+For **every** new or modified table, provide a full column specification:
+
+```markdown
+#### Table: `categories` (master / lookup table)
+
+| Column     | Type          | Constraints         | Notes                  |
+| ---------- | ------------- | ------------------- | ---------------------- |
+| id         | UUID          | PK, default: UUIDv4 |                        |
+| code       | STRING(50)    | NOT NULL, UNIQUE    | e.g. 'active', 'other' |
+| name       | STRING(255)   | NOT NULL            | Display name           |
+| sort_order | INTEGER       | NOT NULL, default: 0|                        |
+| created_at | TIMESTAMP     | NOT NULL            | Managed by Sequelize   |
+| updated_at | TIMESTAMP     | NOT NULL            | Managed by Sequelize   |
+| deleted_at | TIMESTAMP     | NULLABLE            | Soft delete (paranoid) |
+
+**Indexes:** `UNIQUE(code)`, `INDEX(sort_order)`.
+
+#### Table: `table_name` (main table — references master)
+
+| Column       | Type      | Constraints                  | Notes                  |
+| ------------ | --------- | ---------------------------- | ---------------------- |
+| id           | UUID      | PK, default: UUIDv4          |                        |
+| name         | STRING(255) | NOT NULL                   |                        |
+| category_id  | UUID      | FK → categories.id, NOT NULL| ON DELETE RESTRICT     |
+| category_other | STRING(255) | NULLABLE                 | When category = "Other" |
+| user_id      | UUID      | FK → users.id, NOT NULL      | ON DELETE CASCADE      |
+| created_at   | TIMESTAMP | NOT NULL                    | Managed by Sequelize   |
+| updated_at   | TIMESTAMP | NOT NULL                    | Managed by Sequelize   |
+| deleted_at   | TIMESTAMP | NULLABLE                    | Soft delete (paranoid) |
+
+**Indexes:** `INDEX(category_id)`, `INDEX(user_id)`.
+
+**Associations:**
+
+- `belongsTo(Category, { foreignKey: 'category_id', as: 'category' })`
+- `belongsTo(User, { foreignKey: 'user_id', as: 'owner' })`
+```
+
+Rules for schema definitions:
+
+- **Always specify**: column name, data type (with length where applicable), constraints (PK, FK, NOT NULL, UNIQUE, DEFAULT), and notes.
+- **Always include**: `id` (UUID, PK), `created_at`, `updated_at`, `deleted_at` (for soft-delete models).
+- **Foreign keys**: specify the referenced table and column, and the ON DELETE / ON UPDATE behavior.
+- **Categories / lookup values**: do **not** use database ENUMs or Sequelize ENUM type. Create **master tables** (e.g. `regions`, `project_types`, `statuses`) with columns such as `id`, `code`, `name`, `sort_order`, and standard timestamps. In the main table, add a FK column (e.g. `region_id` → `regions.id`) and use it as the reference. Document each master table and its **seed data** (initial rows) in the plan. When a dropdown includes "Other", add a row in the master (e.g. code `other`) and optionally a companion `_other` text column on the main table for free text.
+- **Indexes**: list all indexes — unique constraints, composite indexes, and performance indexes on frequently filtered/sorted columns.
+- **Associations**: state the Sequelize association type, foreign key, and alias.
+
+#### API Endpoints
+
+For **every** endpoint in the phase, document:
+
+````markdown
+#### `METHOD /api/v1/resource`
+
+- **Auth**: `authenticateMiddleware` + `requireRoles(['admin'])` (or `public`, or `optional`)
+- **Request Body / Params / Query**:
+  ```json
+  {
+    "field": "type — constraints — description"
+  }
+  ```
+````
+
+- **Validation Rules**:
+  - `field`: required, string, minLength: 2, maxLength: 255
+  - `email`: required, valid email format, unique in `users` table
+- **Business Logic**:
+  1. Step-by-step description of what happens.
+  2. Include conditional logic, side effects (e.g. send email), and error branches.
+- **Success Response**: HTTP status code + example response body using `ApiResponse` format.
+- **Error Responses**: List all expected error cases with status codes and error classes:
+  - 400 `BadRequestError` — missing required fields
+  - 401 `UnauthorizedError` — invalid credentials
+  - 404 `NotFoundError` — resource not found
+  - 409 `ConflictError` — duplicate email
+
+````
+
+Rules for API endpoint documentation:
+- **Group endpoints by resource** (e.g. all `/users` endpoints together).
+- **Specify the full route path** including version prefix (`/api/v1/...`).
+- **Authentication & Authorization**: state exactly which middleware is applied and which roles are allowed.
+- **Request validation**: define every field's type, constraints, and validation rules. Reference reusable schemas from `src/schemas/common.schemas.ts` where applicable.
+- **Business logic**: describe as numbered steps. Include all branching paths (success, various error cases).
+- **Response format**: always use `ApiResponse.success()`, `ApiResponse.created()`, `ApiResponse.paginated()`, or project error classes — never raw objects.
+- **Pagination / Filtering / Sorting**: for list endpoints, specify which fields are filterable and sortable, using the `BaseModel.parseFilters()` pattern.
+
+#### Services & Integrations
+- List any services this phase introduces or uses (e.g. email service, file upload, AI/chat integration).
+- For each service, describe: purpose, interface (methods/signatures), dependencies (env vars, external APIs), and whether it can be stubbed for this phase.
+
+#### Middleware
+- Document any new middleware introduced (e.g. file upload handling, rate limiting).
+- Specify where it is applied (global, per-route, per-group).
+
+#### Master Tables & Constants
+- List all **master (lookup) tables** introduced: table name, columns, and seed rows (initial data). Main tables reference these via FK.
+- List any other constants (e.g. in `src/lib/constants.ts`) that are not stored in master tables.
+- Do not use ENUMs; use master tables for category-like fields.
+
+### Key Files to Add or Change
+Provide a table mapping every file that will be created or modified:
+
+```markdown
+| Action    | Path                                              | Description                                    |
+|-----------|---------------------------------------------------|------------------------------------------------|
+| Migration | `src/db/migrations/YYYYMMDDHHMMSS-create-xxx.js`  | Creates `xxx` table with all columns           |
+| Add       | `src/db/models/Xxx.model.ts`                      | Sequelize model with associations              |
+| Add       | `src/controllers/xxx.controller.ts`               | CRUD controller methods                        |
+| Add       | `src/routes/xxx.routes.ts`                        | Route definitions with schemas & middleware    |
+| Add       | `src/schemas/xxx.schemas.ts`                      | Validation schemas for all endpoints           |
+| Update    | `src/db/models/index.ts`                          | Register new model and associations            |
+| Update    | `src/routes/index.ts`                             | Register new route prefix                      |
+| Add       | `src/services/xxx.service.ts`                     | Service layer for complex business logic       |
+| Add       | `src/__tests__/xxx.test.ts`                       | Test cases for the module                      |
+````
+
+Rules:
+
+- **Every file** that will be touched must appear in this table.
+- Use `Add`, `Update`, `Migration`, or `Delete` as the action.
+- Migration filenames: use `YYYYMMDDHHMMSS` timestamp prefix.
+- Include test files — tests are not optional.
+
+### Acceptance Criteria
+
+- Bullet list of **verifiable** statements that confirm the phase is complete.
+- Each criterion should be independently testable.
+- Cover: functionality, security, data integrity, error handling, and API contract compliance.
+- Reference specific status codes, response shapes, and edge cases.
+
+Example:
+
+```markdown
+- [ ] Admin can create a user via POST `/api/v1/users`; response is 201 with `ApiResponse.created()`.
+- [ ] Non-admin receives 403 `ForbiddenError` when attempting to create a user.
+- [ ] Passwords are stored as bcrypt hashes; plain text never appears in DB or API responses.
+- [ ] All list endpoints support pagination (`page`, `size`), filtering, and sorting per `BaseModel.parseFilters()`.
+```
+
+## Planning README (`planning/README.md`)
+
+The `planning/README.md` serves as the **index** for all phase documents. It must contain:
+
+1. **Project overview** — one paragraph describing the system.
+2. **Phase list table** — phase number, document link, and one-line summary.
+3. **Dependency flow diagram** — Mermaid flowchart showing phase dependencies.
+4. **How to use these plans** — instructions for developers/AI agents.
+5. **Existing boilerplate** — what the codebase already provides (to avoid duplication).
+
+Update the README whenever a new phase is added or dependencies change.
+
+## Database Design Rules
+
+### Naming
+
+- Table names: `snake_case`, plural (e.g. `users`, `project_documents`).
+- Column names: `snake_case` (e.g. `created_at`, `user_id`).
+- Foreign keys: `{referenced_table_singular}_id` (e.g. `user_id`, `project_id`).
+- Join tables (many-to-many): `{table1}_{table2}` alphabetically (e.g. `project_viewers`).
+
+### Standard Columns
+
+Every table must include:
+
+- `id` — UUID, primary key, default UUIDv4.
+- `created_at` — TIMESTAMP, NOT NULL, auto-managed.
+- `updated_at` — TIMESTAMP, NOT NULL, auto-managed.
+- `deleted_at` — TIMESTAMP, nullable (soft delete / paranoid mode).
+
+### Relationships
+
+- Always define both sides of an association (e.g. `User.hasMany(Post)` **and** `Post.belongsTo(User)`).
+- Always specify `foreignKey` and `as` (alias) explicitly.
+- Document ON DELETE behavior (CASCADE, SET NULL, RESTRICT) in the schema table.
+
+### Indexes
+
+- Add indexes on all foreign key columns.
+- Add indexes on columns used in WHERE, ORDER BY, or UNIQUE constraints.
+- For composite filters, consider composite indexes and document them.
+
+### Master Tables for Categories (No ENUMs)
+
+- **Do not use** database-level ENUMs or Sequelize ENUM type for category-like or dropdown values.
+- Create **master tables** (lookup tables) for each distinct category type (e.g. `regions`, `project_types`, `project_stages`, `contract_types`, `statuses`). Typical columns: `id` (UUID, PK), `code` (unique, e.g. `north_west`, `education_dfe`), `name` (display label), `sort_order`, `created_at`, `updated_at`, `deleted_at`.
+- In the **main table**, add a foreign key column referencing the master table (e.g. `region_id` → `regions.id`). Use ON DELETE RESTRICT (or SET NULL if optional) so that referenced master rows are not deleted while in use.
+- Document **seed data** for each master table in the plan (list the initial rows or reference a seed migration).
+- When a dropdown includes "Other", add a row in the master table with code `other` (or similar) and, if needed, a companion nullable text column on the main table (e.g. `region_other`) for user-entered detail.
+
+### Migrations
+
+- One migration per logical change (create table, add columns, add indexes).
+- Always include both `up()` and `down()` methods.
+- Never modify an existing migration that has been run — create a new one.
+- Add indexes in the same migration as the table creation when possible.
+
+## API Design Rules
+
+### RESTful Conventions
+
+- Use plural nouns: `/api/v1/users`, `/api/v1/projects`.
+- Use HTTP methods correctly: GET (read), POST (create), PATCH (partial update), DELETE (soft delete).
+- Use nested routes for sub-resources: `/api/v1/projects/:projectId/documents`.
+- Always version the API: `/api/v1/...`.
+
+### Request & Response
+
+- **Request bodies**: JSON only. Define JSON Schema for Fastify validation.
+- **Responses**: Always use `ApiResponse` helpers — never return raw objects.
+- **Pagination**: Use `page` and `size` query params. Return `meta` with `page`, `limit`, `total`, `totalPages`.
+- **Filtering**: Use `field__operator=value` query syntax as per `BaseModel.parseFilters()`.
+- **Sorting**: Use `sort=field1|field2-` syntax (pipe-separated, `-` suffix for DESC).
+
+### Status Codes
+
+Follow these consistently across all endpoints:
+
+- `200` — successful GET, PATCH
+- `201` — successful POST (resource created)
+- `204` — successful DELETE
+- `400` — bad request / invalid input
+- `401` — missing or invalid authentication
+- `403` — authenticated but insufficient permissions
+- `404` — resource not found
+- `409` — conflict (e.g. duplicate unique field)
+- `422` — validation error (schema validation failed)
+- `429` — rate limit exceeded
+- `500` — internal server error
+
+### Error Handling in Plans
+
+- For every endpoint, list **all expected error responses** with:
+  - The HTTP status code.
+  - The error class from `src/lib/errors.ts` (e.g. `NotFoundError`, `ConflictError`).
+  - A description of when this error occurs.
+  - The error `code` string if applicable.
+
+### Authentication & Authorization
+
+- Specify for every endpoint: public, authenticated, or role-restricted.
+- For role-restricted: list allowed roles explicitly (e.g. `['admin']`, `['admin', 'project_manager']`).
+- Use `authenticateMiddleware` → authorization middleware ordering.
+- **Node-Casbin (RBAC)**: When the project uses Node-Casbin for authorization:
+  - **Model**: Document the Casbin model (e.g. in `src/assets/casbin/model.conf`): `request_definition` (e.g. sub, obj, act), `policy_definition`, `role_definition` (e.g. g = _, _), `policy_effect`.
+  - **Policy**: Document policy rules (p = role, resource, action) and role assignments (g = user/role, role). Either list them in the plan (e.g. admin can users/*, project_manager can projects/:id/* for assigned projects) or reference the policy file/adapter.
+  - **Per endpoint**: In the **Auth** line, state the required (subject, resource, action) or the middleware used (e.g. `requirePermission('users', 'write')`). Subject is typically the user’s role (from JWT) or user id; object = resource (e.g. `users`, `projects`); action = `read`, `write`, `delete` (or HTTP method).
+  - **Key files**: Include in "Key Files to Add or Change": Casbin model file, policy file or adapter, and the middleware that calls `enforcer.enforce(sub, obj, act)` and throws `ForbiddenError` on deny.
+  - **Resource/action naming**: Use consistent names across the plan (e.g. resources: `users`, `projects`, `reports`; actions: `read`, `write`, `delete`) so the policy can be written unambiguously.
+
+## Service & Business Logic Rules
+
+### Service Layer
+
+- Complex business logic (multi-model operations, external API calls, transactions) must be in `src/services/`.
+- Controllers should be thin — delegate to services.
+- Services must be documented in the plan with method signatures and descriptions.
+
+### Transactions
+
+- If a business operation touches multiple tables, wrap it in a Sequelize transaction.
+- Document which operations require transactions in the plan.
+
+### Side Effects
+
+- Document all side effects (e.g. "sends email", "uploads to S3", "triggers webhook").
+- If a side effect depends on a service from a future phase, mark it as "stub" with a clear interface.
+
+## Testing Requirements in Plans
+
+### Test Scope
+
+Every phase plan must define the **test coverage expectations**:
+
+- List the test file(s) to create.
+- For each endpoint, list the test cases (happy path + error cases).
+- Include edge cases (e.g. empty lists, max-length inputs, concurrent operations).
+
+### Test Case Template
+
+```markdown
+#### Tests for `POST /api/v1/resource`
+
+- should create resource successfully (201)
+- should return 400 for missing required fields
+- should return 401 for unauthenticated request
+- should return 403 for unauthorized role
+- should return 409 for duplicate unique field
+- should sanitize sensitive fields in response
+- should validate field constraints (minLength, maxLength, format)
+```
+
+### TDD Workflow Reminder
+
+Plans should remind implementers to follow TDD:
+
+1. Write tests first.
+2. Implement the feature.
+3. Run tests and fix until all pass.
+4. Verify coverage >= 80%.
+
+## Cross-Phase Consistency Rules
+
+### Shared Patterns
+
+- Reuse existing patterns from the boilerplate: `ApiResponse`, `BaseModel.parseFilters()`, `authenticateMiddleware`, error classes, `.js` import extensions.
+- Do not introduce new patterns that contradict `code-standard-rules.mdc` or `global-rules.mdc`.
+
+### Forward References
+
+- If a phase introduces a model or API that will be extended in a later phase, document what is deferred.
+- Example: "The `assigned_to` field supports only a single PM in this phase. Multi-viewer assignment is deferred to Phase 7."
+
+### Backward Compatibility
+
+- When updating existing models or APIs, document what changes and ensure backward compatibility.
+- If a breaking change is required, document the migration path.
+
+### Environment Variables
+
+- Any new env variable introduced must be:
+  - Listed in the plan.
+  - Added to `.env.example` with a descriptive comment.
+
+## Common Planning Mistakes to Avoid
+
+| Mistake                              | Correct Approach                                                   |
+| ------------------------------------ | ------------------------------------------------------------------ |
+| Vague schema: "add necessary fields" | Explicit column list with types, constraints, and defaults         |
+| Missing FK/index definitions         | Always specify FK references, ON DELETE behavior, and indexes      |
+| Undocumented error cases             | List every error response with status code and error class         |
+| No test plan                         | Include test cases for every endpoint                              |
+| Using ENUMs for categories           | Create master tables for categories; use FK in main table; add `_other` text column when master has "Other" row |
+| No dependency declaration            | Always state which phases and artifacts are required               |
+| Mixing concerns across phases        | Keep each phase focused on a single cohesive feature set           |
+| Forgetting soft delete               | Include `deleted_at` and paranoid mode for all relevant models     |
+| Missing pagination on list endpoints | All list endpoints must support pagination, filtering, and sorting |
+| Not specifying auth requirements     | Every endpoint must state its auth/role requirements               |
+
+## Planning Checklist
+
+Before finalizing a phase plan, verify:
+
+- [ ] **Title & objectives** are clear and concise.
+- [ ] **Dependencies** on prior phases are explicitly listed.
+- [ ] **Every database table** has a full column specification (types, constraints, defaults, FKs, indexes, associations).
+- [ ] **Every API endpoint** has method, path, auth, request/response format, validation rules, business logic steps, and all error responses.
+- [ ] **Services and integrations** are documented with interfaces and stub/defer notes.
+- [ ] **Master tables** (and seed data) and **constants** are documented.
+- [ ] **Key files table** lists every file to add, update, or delete — including migrations and tests.
+- [ ] **Acceptance criteria** are verifiable, testable statements.
+- [ ] **Test cases** are listed for every endpoint (happy + error paths).
+- [ ] **`planning/README.md`** is updated with the new phase entry and dependency diagram.
+- [ ] **Environment variables** introduced are documented.
+- [ ] **No contradiction** with `global-rules.mdc` or `code-standard-rules.mdc`.
+
+## Example Phase Document Skeleton
+
+```markdown
+# Phase {N} — {Title}
+
+## Objectives
+
+- ...
+
+## Dependencies
+
+- Phase {X} — {what is needed from it}
+
+## Backend Scope
+
+### 1. Database Schema
+
+#### Table: `resource_name`
+
+| Column | Type | Constraints        | Notes |
+| ------ | ---- | ------------------ | ----- |
+| id     | UUID | PK, default UUIDv4 |       |
+| ...    | ...  | ...                | ...   |
+
+**Indexes:** ...
+**Associations:** ...
+
+### 2. API Endpoints
+
+#### `POST /api/v1/resources`
+
+- **Auth**: ...
+- **Body**: ...
+- **Validation**: ...
+- **Logic**: ...
+- **Success**: 201 ...
+- **Errors**: ...
+
+#### `GET /api/v1/resources`
+
+...
+
+### 3. Services
+
+- ...
+
+### 4. Middleware
+
+- ...
+
+### 5. Master Tables & Constants
+
+- List master tables and seed data; list any other constants.
+
+## Key Files to Add or Change
+
+| Action | Path | Description |
+| ------ | ---- | ----------- |
+| ...    | ...  | ...         |
+
+## Test Cases
+
+### Tests for `POST /api/v1/resources`
+
+- ...
+
+### Tests for `GET /api/v1/resources`
+
+- ...
+
+## Acceptance Criteria
+
+- [ ] ...
+```

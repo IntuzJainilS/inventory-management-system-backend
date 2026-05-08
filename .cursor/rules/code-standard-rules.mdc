@@ -1,0 +1,772 @@
+---
+alwaysApply: true
+---
+
+# Code Standard Rules
+
+## TypeScript Best Practices
+
+### Type Safety
+
+- Always use explicit types for function parameters and return values
+- Avoid using `any` type - use `unknown` for truly dynamic data
+- Use interfaces for object shapes and types for unions/primitives
+- Leverage TypeScript's strict mode features
+
+### Optional Chaining (CRITICAL)
+
+- Always use optional chaining (`?.`) when accessing properties on variables that might be null or undefined.
+- Example: Use `user?.dataValues?.email` instead of `user.dataValues.email` to prevent runtime errors.
+
+### Imports
+
+- Use `.js` extensions in import statements (TypeScript ESM requirement)
+- Example: `import { models } from '../db/models/index.js'`
+
+## Fastify Patterns
+
+### Route Definitions
+
+- Define routes in separate route files under `src/routes/`
+- Use async functions for route plugins
+- Always include schema validation for routes
+- Use `preHandler` for middleware (e.g., authentication)
+
+```typescript
+server.post('/', {
+  schema: createUserSchema,
+  preHandler: [authenticateMiddleware],
+  handler: UsersController.create,
+});
+```
+
+### Controllers
+
+- Place business logic in controllers under `src/controllers/`
+- Use static methods for controller actions
+- Type request/reply with Fastify generics
+- Always sanitize sensitive data before sending responses
+
+```typescript
+static async getById(
+    request: FastifyRequest<{ Params: UUIDParam }>,
+    reply: FastifyReply
+): Promise<void> {
+    // Controller logic
+}
+```
+
+## Error Handling
+
+### Custom Error Classes
+
+- Use custom error classes from `src/lib/errors.ts`
+- Available errors: `BadRequestError`, `UnauthorizedError`, `ForbiddenError`, `NotFoundError`, `ConflictError`, `ValidationError`, `TooManyRequestsError`, `InternalServerError`
+- All errors extend `AppError` with `statusCode`, `code`, and optional `details`
+
+```typescript
+throw new NotFoundError('User not found');
+throw new ValidationError('Invalid input', { field: 'email' });
+```
+
+### Error Middleware
+
+- Errors are automatically caught by the global error handler
+- Never use `try-catch` for operational errors - throw directly
+- The error handler will format errors using `ApiResponse.error()`
+
+## Response Formatting
+
+### Standard Response Structure
+
+- Always use `ApiResponse` helpers from `src/lib/responses.ts`
+- Never manually construct response objects
+
+```typescript
+// Success responses
+reply.send(ApiResponse.success(data, 'Success message'));
+reply.send(ApiResponse.created(data, 'Resource created'));
+
+// Paginated responses
+reply.send(ApiResponse.paginated(items, total, page, limit));
+
+// Error responses (handled by error middleware)
+throw new NotFoundError('Resource not found');
+```
+
+### Response Structure
+
+All responses follow this format:
+
+```typescript
+{
+    success: boolean,
+    statusCode: number,
+    message: string,
+    data?: T,
+    error?: { code: string, details?: unknown },
+    meta?: { page, limit, total, totalPages },
+    timestamp: string
+}
+```
+
+## Database Patterns (Sequelize)
+
+### Model Usage
+
+- All models extend `BaseModel` which provides advanced filtering, sorting, and pagination
+- Use `models.ModelName` from `src/db/models/index.ts`
+- Always use `findByPk`, `findOne`, `findAll`, `findAndCountAll`
+
+### Query Filtering
+
+The `BaseModel.parseFilters()` method supports advanced filtering:
+
+```typescript
+// Parse filters with pagination
+const filters = models.User.parseFilters(query, true);
+const { rows, count } = await models.User.findAndCountAll(filters);
+
+// Supported filter operators:
+// - field__is: exact match
+// - field__con: contains (case-insensitive)
+// - field__sw: starts with
+// - field__ew: ends with
+// - field__gte: greater than or equal
+// - field__lte: less than or equal
+// - field__gt: greater than
+// - field__lt: less than
+// - field__in: in array (comma-separated)
+```
+
+### Sorting
+
+```typescript
+// Query: ?sort=name|created_at-
+// Sorts by name ASC, then created_at DESC
+// Use pipe (|) to separate fields
+// Use minus (-) suffix for descending order
+```
+
+### Pagination
+
+```typescript
+// Query: ?page=0&size=10
+// Returns paginated results with meta object
+// If page/size not provided, returns all records
+```
+
+### Attribute Selection
+
+```typescript
+// Query: ?attributes=id|name|email
+// Returns only specified fields
+// Use pipe (|) to separate field names
+```
+
+### Soft Deletes
+
+- Models support soft deletes via `deleted_at` timestamp
+- Use `model.destroy()` for soft delete
+- Use `paranoid: false` in query options to include deleted records
+
+### Data Sanitization
+
+- Always call `model.sanitize()` before sending responses
+- Removes sensitive fields like `password`, `password_hash`, etc.
+
+```typescript
+const user = await models.User.findByPk(id);
+user.sanitize();
+reply.send(ApiResponse.success(user));
+```
+
+## Authentication
+
+### JWT Middleware
+
+- Use `authenticateMiddleware` for protected routes
+- Use `optionalAuthMiddleware` for routes that work with/without auth
+- Token format: `Authorization: Bearer <token>`
+
+```typescript
+// Protected route
+server.get('/protected', {
+  preHandler: [authenticateMiddleware],
+  handler: async (request, reply) => {
+    // request.user is available
+  },
+});
+
+// Optional auth route
+server.get('/public', {
+  preHandler: [optionalAuthMiddleware],
+  handler: async (request, reply) => {
+    if (request.user) {
+      // Authenticated user
+    } else {
+      // Anonymous user
+    }
+  },
+});
+```
+
+### JWT Utilities
+
+- `generateToken(payload)`: Create JWT token
+- `verifyToken(token)`: Verify and decode token
+- `extractTokenFromHeader(header)`: Extract token from Authorization header
+
+## Node-Casbin (RBAC)
+
+Use **Node-Casbin** for role-based access control. Authentication (JWT) identifies the user; Casbin decides whether the user is allowed to perform an action on a resource.
+
+### Setup
+
+- **Package**: `casbin` (npm). Create one **Enforcer** instance (e.g. in `src/lib/casbin.ts` or a service) loaded with a model and policy.
+- **Model file**: Define in `src/assets/casbin/model.conf` (or `config/casbin/model.conf`). Use an RBAC model with:
+  - **request_definition**: e.g. `r = sub, obj, act` (subject = user/role, object = resource, action = operation).
+  - **policy_definition**: e.g. `p = sub, obj, act` (permission rules).
+  - **role_definition**: e.g. `g = _, _` (user–role mapping; first arg user, second role).
+  - **policy_effect**: e.g. `e = some(where (p.eft == allow))`.
+- **Policy**: Store in CSV (e.g. `src/assets/casbin/policy.csv`) or use a DB adapter. Policy lines define permissions (`p`, role, resource, action) and role assignments (`g`, user/identifier, role).
+
+### Usage in Middleware
+
+- After `authenticateMiddleware`, the request has `request.user` (e.g. `id`, `role`). Use **subject** = `request.user.role` (or `request.user.id` for user-level policies).
+- **Object** = resource (e.g. route path, resource name like `projects`, `users`).
+- **Action** = HTTP method or logical action (e.g. `read`, `write`, `delete`, or `get`, `post`, `patch`, `delete`).
+- Call `await enforcer.enforce(sub, obj, act)`. If `false`, throw `ForbiddenError` and do not run the handler.
+- Use a single **authorize middleware** that accepts (resource, action) or derives them from the route, then calls the enforcer with `(request.user.role, resource, action)`.
+
+```typescript
+// Example: src/middlewares/casbin-auth.ts
+import { FastifyRequest, FastifyReply } from 'fastify';
+import { getEnforcer } from '../lib/casbin.js';
+import { UnauthorizedError, ForbiddenError } from '../lib/errors.js';
+
+export function requirePermission(resource: string, action: string) {
+  return async function (request: FastifyRequest, reply: FastifyReply): Promise<void> {
+    if (!request.user) throw new UnauthorizedError('Authentication required');
+    const enforcer = await getEnforcer();
+    const allowed = await enforcer.enforce(request.user.role, resource, action);
+    if (!allowed) throw new ForbiddenError('Insufficient permissions');
+  };
+}
+
+// Route: preHandler: [authenticateMiddleware, requirePermission('users', 'write')]
+```
+
+### Enforcer API (typical)
+
+- `enforcer.enforce(sub, obj, act)`: returns `Promise<boolean>` — use for each request.
+- `enforcer.getRolesForUser(user)`: returns roles for a user (if using `g` with user id).
+- `enforcer.addPermissionForUser(role, resource, action)` / `enforcer.deletePermissionForUser(...)`: manage policy programmatically if needed.
+- Load enforcer once (singleton or per-request from pool) and reuse; use async `newEnforcer(modelPath, policyPath)` or adapter.
+
+### Conventions
+
+- Define resources and actions in constants (e.g. `src/lib/casbin-constants.ts`): resource names (`users`, `projects`, `reports`), actions (`read`, `write`, `delete`).
+- Keep model and policy under version control. For policy stored in DB, use the appropriate Casbin adapter and document it in the service.
+- In route definitions, use `preHandler: [authenticateMiddleware, requirePermission('resource', 'action')]` instead of (or in addition to) ad-hoc role checks where RBAC is centralized in Casbin.
+
+## Request Validation
+
+### Schema Definition
+
+- Define schemas in `src/schemas/` directory
+- Use JSON Schema format (Fastify's native validation)
+- Validate body, params, querystring, and headers
+- Define response schemas for documentation
+
+```typescript
+export const createUserSchema: FastifySchema = {
+  body: {
+    type: 'object',
+    required: ['email', 'name'],
+    properties: {
+      email: emailSchema,
+      name: { type: 'string', minLength: 2, maxLength: 100 },
+    },
+    additionalProperties: false,
+  },
+  response: {
+    201: {
+      /* response schema */
+    },
+  },
+};
+```
+
+### Common Schemas
+
+- Reuse common schemas from `src/schemas/common.schemas.ts`
+- Available: `emailSchema`, `uuidParamSchema`, `paginationSchema`
+
+## API Design
+
+### RESTful Conventions
+
+- Use proper HTTP methods: GET, POST, PUT, PATCH, DELETE
+- Use plural nouns for resources: `/users`, `/posts`
+- Use nested routes for relationships: `/users/:id/posts`
+
+### Status Codes
+
+- 200 OK: Successful GET, PUT, PATCH
+- 201 Created: Successful POST
+- 204 No Content: Successful DELETE
+- 400 Bad Request: Invalid input
+- 401 Unauthorized: Missing/invalid authentication
+- 403 Forbidden: Insufficient permissions
+- 404 Not Found: Resource not found
+- 409 Conflict: Resource conflict (e.g., duplicate email)
+- 422 Validation Error: Schema validation failed
+- 429 Too Many Requests: Rate limit exceeded
+- 500 Internal Server Error: Server error
+
+### Endpoint Naming
+
+- Use kebab-case for multi-word endpoints
+- Be consistent with pluralization
+- Version APIs if needed: `/api/v1/users`
+
+## Testing
+
+### Test Framework — Vitest
+
+This project uses **Vitest** as the test runner. Configuration lives in `vitest.config.ts` at the project root. Globals (`describe`, `it`, `expect`, `vi`, `beforeEach`, `afterEach`, `beforeAll`, `afterAll`) are enabled — **do not** import them from `vitest`.
+
+#### NPM Scripts
+
+| Script                  | Purpose                                      |
+| ----------------------- | -------------------------------------------- |
+| `npm run test`          | Watch mode — re-runs on file changes         |
+| `npm run test:run`      | Single run — use in CI and before committing |
+| `npm run test:ui`       | Interactive Vitest UI                        |
+| `npm run test:coverage` | Single run with v8 coverage report           |
+
+Always run `npm run test:run` to validate before committing. Use `npm run test:coverage` to verify the coverage threshold.
+
+### Test-Driven Development (TDD) for Complex Tasks
+
+When developing complex features (complete CRUD operations, migrations, models, controllers, routes), follow this AI-powered TDD workflow:
+
+#### Workflow Steps
+
+1. **Write Test Cases First**: Before implementing any code, write comprehensive test cases covering:
+   - All CRUD operations (Create, Read, Update, Delete, List)
+   - Happy paths and success scenarios
+   - Error cases (validation errors, not found, unauthorized, conflicts)
+   - Edge cases and boundary conditions
+   - Authentication and authorization scenarios
+   - Data sanitization and response format validation
+
+2. **Implement the Feature**: After tests are written, implement:
+   - Database migrations (if needed)
+   - Model definitions with proper associations
+   - Controller methods with business logic
+   - Route definitions with schemas
+   - Middleware and authentication
+
+3. **Run Tests**: Execute `npm run test:run` against the newly implemented feature
+
+4. **Fix Issues**: If any test fails:
+   - Analyze the failure message and stack trace from the Vitest output
+   - Identify the root cause (logic error, missing validation, incorrect response format, etc.)
+   - Fix the issue in the implementation
+   - Re-run `npm run test:run` to verify the fix
+   - Repeat until all tests pass
+
+5. **Verify Coverage**: Run `npm run test:coverage` and ensure:
+   - Minimum 800% code coverage for new features
+   - All public methods and endpoints are covered
+   - Error handling paths are tested
+   - Response structure matches `ApiResponse` format
+
+#### Test Coverage Requirements
+
+- Minimum 80% code coverage for new features
+- Test all public methods and endpoints
+- Include integration tests for database operations
+- Test error handling paths
+- Verify response structure matches `ApiResponse` format
+
+### Test File Organization
+
+- Place tests next to source files as `*.test.ts` / `*.spec.ts`, or in the `src/__tests__/` directory
+- Vitest discovers files matching: `src/**/*.test.ts`, `src/**/*.spec.ts`, `src/__tests__/**/*.ts`
+- Use descriptive test names following the pattern: `should [expected behavior] when [condition]`
+
+```typescript
+// Example: src/__tests__/users.test.ts
+describe('Users API', () => {
+  describe('POST /users', () => {
+    it('should create a user successfully', async () => {});
+    it('should return 400 for invalid email', async () => {});
+    it('should return 409 for duplicate email', async () => {});
+  });
+
+  describe('GET /users/:id', () => {
+    it('should return user by id', async () => {});
+    it('should return 404 for non-existent user', async () => {});
+  });
+});
+```
+
+### Mocking with Vitest
+
+Use Vitest's built-in `vi` utilities for mocking — **never** install external mocking libraries.
+
+```typescript
+// Spy on a method
+const spy = vi.spyOn(models.User, 'findByPk').mockResolvedValue(mockUser);
+
+// Mock an entire module
+vi.mock('../lib/jwt.js', () => ({
+  generateToken: vi.fn().mockReturnValue('mock-token'),
+  verifyToken: vi.fn().mockReturnValue({ id: 'user-1' }),
+}));
+
+// Inline mock function
+const handler = vi.fn();
+
+// Restore all mocks between tests
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+```
+
+### Test Lifecycle Hooks
+
+```typescript
+beforeAll(async () => {
+  // One-time setup (e.g., start test server, seed DB)
+});
+
+afterAll(async () => {
+  // One-time teardown (e.g., close connections)
+});
+
+beforeEach(() => {
+  // Per-test setup (e.g., reset mocks, start transaction)
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  // Per-test cleanup (e.g., rollback transaction)
+});
+```
+
+### Test Best Practices
+
+- Clean up test data after each test (use transactions or cleanup hooks)
+- Mock external dependencies (databases, third-party APIs) with `vi.mock()` / `vi.spyOn()`
+- Use test fixtures for consistent test data
+- Use `vi.restoreAllMocks()` in `afterEach` to prevent mock leakage
+- Use `vi.useFakeTimers()` / `vi.useRealTimers()` when testing time-dependent logic
+- Prefer `toStrictEqual` over `toEqual` for exact object shape matching
+- Use `async/await` with Vitest's built-in promise matchers (`resolves`, `rejects`)
+
+## Performance
+
+### Database Optimization
+
+- Use indexes on frequently queried fields
+- Use `attributes` to select only needed fields
+- Use pagination for large datasets
+- Avoid N+1 queries - use `include` for associations
+
+### Caching
+
+- Use Redis for session storage and caching (if enabled)
+- Cache frequently accessed data
+- Set appropriate TTL values
+
+## Security
+
+### Best Practices
+
+- Never log sensitive data (passwords, tokens)
+- Always sanitize user input
+- Use parameterized queries (Sequelize handles this)
+- Validate all input with schemas
+- Use HTTPS in production
+- Set secure HTTP headers
+- Implement rate limiting
+- Use environment variables for secrets
+
+### Password Handling
+
+- Never store plain text passwords
+- Use bcrypt for password hashing
+- Set appropriate salt rounds (10-12)
+
+## Logging
+
+### Log Levels
+
+- Use appropriate log levels: error, warn, info, debug
+- Log errors with stack traces
+- Log request/response in development
+- Avoid logging sensitive data
+
+## Documentation
+
+### Code Comments
+
+- Use JSDoc comments for functions and classes
+- Document complex logic and business rules
+- Keep comments up to date with code changes
+- Explain "why" not "what"
+
+### API Documentation
+
+- Document all endpoints with schemas
+- Include example requests/responses
+- Document query parameters and filters
+- Use OpenAPI/Swagger for API documentation
+
+## Database Migrations
+
+### Migration Best Practices
+
+- Always create migrations for schema changes (never modify existing migrations)
+- Use descriptive migration names: `YYYYMMDDHHMMSS-description.js`
+- Include both `up` and `down` methods for rollback support
+- Add indexes for foreign keys and frequently queried fields
+- Use transactions for data migrations
+- Test migrations in development before applying to production
+
+```typescript
+// Example migration structure
+export async function up(queryInterface: QueryInterface, Sequelize: typeof DataTypes) {
+  await queryInterface.createTable('users', {
+    id: { type: Sequelize.UUID, primaryKey: true, defaultValue: Sequelize.UUIDV4 },
+    email: { type: Sequelize.STRING, allowNull: false, unique: true },
+    // ... other fields
+  });
+
+  await queryInterface.addIndex('users', ['email']);
+}
+
+export async function down(queryInterface: QueryInterface) {
+  await queryInterface.dropTable('users');
+}
+```
+
+## Transaction Management
+
+### Database Transactions
+
+- Use transactions for operations that must succeed or fail together
+- Always handle transaction rollback on errors
+- Keep transactions as short as possible
+- Use Sequelize transaction API for complex operations
+
+```typescript
+const transaction = await sequelize.transaction();
+try {
+  await models.User.create(userData, { transaction });
+  await models.Profile.create(profileData, { transaction });
+  await transaction.commit();
+} catch (error) {
+  await transaction.rollback();
+  throw error;
+}
+```
+
+## Async/Await Patterns
+
+### Asynchronous Code
+
+- Always use `async/await` instead of promises chains
+- Handle errors properly - let them propagate to error middleware
+- Use `Promise.all()` for parallel independent operations
+- Use `Promise.allSettled()` when you need all results regardless of failures
+
+```typescript
+// Parallel operations
+const [users, posts] = await Promise.all([models.User.findAll(), models.Post.findAll()]);
+
+// Independent operations that should all complete
+const results = await Promise.allSettled([sendEmail(), updateLog(), cacheData()]);
+```
+
+## Service Layer Pattern
+
+### Business Logic Separation
+
+- Use service classes for complex business logic that spans multiple models
+- Keep controllers thin - delegate to services
+- Services should be testable independently
+- Place services in `src/services/` directory
+
+```typescript
+// Example service
+export class UserService {
+  static async createUserWithProfile(userData: CreateUserDto, profileData: CreateProfileDto) {
+    const transaction = await sequelize.transaction();
+    try {
+      const user = await models.User.create(userData, { transaction });
+      const profile = await models.Profile.create(
+        { ...profileData, userId: user.id },
+        { transaction }
+      );
+      await transaction.commit();
+      return { user, profile };
+    } catch (error) {
+      await transaction.rollback();
+      throw error;
+    }
+  }
+}
+```
+
+## Model Associations
+
+### Sequelize Associations
+
+- Define associations in model files using `associate()` method
+- Use appropriate association types: `hasOne`, `hasMany`, `belongsTo`, `belongsToMany`
+- Always include foreign key constraints
+- Use `include` in queries to eager load associations and avoid N+1 queries
+
+```typescript
+// In User model
+static associate(models: typeof Models) {
+    User.hasMany(models.Post, { foreignKey: 'userId', as: 'posts' });
+    User.belongsTo(models.Role, { foreignKey: 'roleId', as: 'role' });
+}
+
+// Usage in controller
+const user = await models.User.findByPk(id, {
+    include: [
+        { model: models.Post, as: 'posts' },
+        { model: models.Role, as: 'role' }
+    ]
+});
+```
+
+## Input Validation
+
+### Validation Best Practices
+
+- Validate at schema level (Fastify JSON Schema)
+- Validate at model level (Sequelize validators)
+- Sanitize input before database operations
+- Use custom validators for complex business rules
+- Return specific validation error messages
+
+```typescript
+// Model-level validation
+email: {
+    type: DataTypes.STRING,
+    allowNull: false,
+    unique: true,
+    validate: {
+        isEmail: { msg: 'Invalid email format' },
+        notEmpty: { msg: 'Email is required' }
+    }
+}
+```
+
+## Code Reusability
+
+### DRY Principles
+
+- Extract common logic into utility functions
+- Create reusable middleware for common operations
+- Use base classes or mixins for shared functionality
+- Create helper functions in `src/lib/` directory
+- Reuse common schemas from `src/schemas/common.schemas.ts`
+
+## Error Context
+
+### Error Details
+
+- Always provide meaningful error messages
+- Include relevant context in error details
+- Log errors with sufficient context for debugging
+- Never expose internal error details to clients in production
+
+```typescript
+throw new ValidationError('Invalid user data', {
+  field: 'email',
+  value: email,
+  reason: 'Email already exists',
+});
+```
+
+## Request/Response Types
+
+### TypeScript Typing
+
+- Define interfaces for request bodies, params, and query strings
+- Use Fastify generics for type-safe request/reply objects
+- Create shared types in `src/types/` directory
+- Export types for reuse across controllers and services
+
+```typescript
+interface CreateUserBody {
+    email: string;
+    name: string;
+    password: string;
+}
+
+interface UserParams {
+    id: string;
+}
+
+static async create(
+    request: FastifyRequest<{ Body: CreateUserBody }>,
+    reply: FastifyReply
+): Promise<void> {
+    // Type-safe access to request.body
+}
+```
+
+## Middleware Composition
+
+### Middleware Best Practices
+
+- Compose multiple middleware functions in `preHandler` array
+- Order matters: authentication before authorization, validation before business logic
+- Create reusable middleware for common patterns
+- Keep middleware focused on single responsibilities
+
+```typescript
+server.post('/users', {
+  preHandler: [authenticateMiddleware, authorizeMiddleware(['admin']), validateRequestMiddleware],
+  handler: UsersController.create,
+});
+```
+
+## Database Query Optimization
+
+### Query Performance
+
+- Use `select` to limit fields returned
+- Use `include` with `required: false` for optional associations
+- Add database indexes for frequently filtered/sorted columns
+- Use `findAndCountAll` for paginated lists
+- Avoid selecting unnecessary associations
+- Use raw queries sparingly and only when necessary
+
+```typescript
+// Optimized query
+const { rows, count } = await models.User.findAndCountAll({
+  attributes: ['id', 'name', 'email'], // Only select needed fields
+  include: [
+    {
+      model: models.Post,
+      as: 'posts',
+      required: false, // LEFT JOIN instead of INNER JOIN
+      attributes: ['id', 'title'], // Limit post fields
+    },
+  ],
+  where: { active: true },
+  limit: 10,
+  offset: 0,
+});
+```
